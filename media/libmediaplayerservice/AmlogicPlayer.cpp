@@ -27,10 +27,10 @@
 #include <sys/stat.h>
 #include <utils/String8.h>
 
-#include <surfaceflinger/Surface.h>
+#include <gui/Surface.h>
 #include <gui/ISurfaceTexture.h>
 #include <gui/SurfaceTextureClient.h>
-#include <surfaceflinger/ISurfaceComposer.h>
+#include <gui/ISurfaceComposer.h>
 
 #include <android/native_window.h>
 
@@ -1378,8 +1378,6 @@ status_t    AmlogicPlayer::setParameter(int key, const Parcel &request)
 			curLayout=newRect;
 			break;
 			}
-		case KEY_PARAMETER_TIMED_TEXT_TRACK_INDEX:	
-			break;
 		case KEY_PARAMETER_AML_PLAYER_SWITCH_AUDIO_TRACK:
 			//audio TRACK?
 			if(mPlayer_id>=0)
@@ -1394,9 +1392,6 @@ status_t    AmlogicPlayer::setParameter(int key, const Parcel &request)
 					player_aid(mPlayer_id,aid);
 				}
 			}				
-			break;
-		case KEY_PARAMETER_TIMED_TEXT_ADD_OUT_OF_BAND_SOURCE:
-			//_ADD_OUT_OF_BAND_SOURCE?
 			break;
 		case KEY_PARAMETER_CACHE_STAT_COLLECT_FREQ_MS:
 			//FREQ_MS?

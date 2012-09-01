@@ -6,10 +6,10 @@
 
 #include "AmlogicPlayerRender.h"
 
-#include <surfaceflinger/Surface.h>
+#include <gui/Surface.h>
 #include <gui/ISurfaceTexture.h>
 #include <gui/SurfaceTextureClient.h>
-#include <surfaceflinger/ISurfaceComposer.h>
+#include <gui/ISurfaceComposer.h>
 
 #include <android/native_window.h>
 #include <cutils/properties.h>
@@ -64,13 +64,17 @@ bool AmlogicPlayerRender::PlatformWantOSDscale(void)
 	char mode[32]="panel";
 	#define OSDSCALESET					"rw.fb.need2xscale"
 	#define PLAYERER_ENABLE_SCALER		"media.amplayer.osd2xenable"
-	#define DISP_MODE_PATH  				"/sys/class/display/mode"	
+	#define DISP_MODE_PATH  				"/sys/class/display/mode"
+	
 	if(	AmlogicPlayer::PropIsEnable(PLAYERER_ENABLE_SCALER) && /*Player has enabled scaler*/
 		AmlogicPlayer::PropIsEnable(OSDSCALESET) && /*Player framebuffer have enable*/
 		(!amsysfs_get_sysfs_str(DISP_MODE_PATH,mode,32)&& !strncmp(mode,"1080p",5)))/*hdmi  1080p*/
-	{		ALOGI("PlatformWantOSDscale true\n");
+	{
+		ALOGI("PlatformWantOSDscale true\n");
+
 		return true;
-	}	
+	}
+	
 	return false;
 }
 
@@ -124,7 +128,8 @@ status_t AmlogicPlayerRender::initCheck()
 status_t AmlogicPlayerRender::readyToRun()
 {
 	 TRACE();
-	return OK;
+
+	return OK;
 }
 
 
@@ -232,7 +237,8 @@ status_t AmlogicPlayerRender::ScheduleOnce()
 	TRACE();
 	mCondition.signal();
 	return OK;
-}
+}
+
 
 status_t AmlogicPlayerRender::Start()
 {
@@ -245,7 +251,8 @@ status_t AmlogicPlayerRender::Start()
 	mPaused=false;
 	ScheduleOnce();
 	return OK;
-}
+}
+
 status_t AmlogicPlayerRender::Stop()
 {
 	TRACE();
@@ -256,7 +263,8 @@ status_t AmlogicPlayerRender::Stop()
 	}
 	requestExitAndWait();
 	return OK;
-}
+}
+
 status_t AmlogicPlayerRender::Pause()
 {
 	TRACE();
@@ -264,7 +272,8 @@ status_t AmlogicPlayerRender::Pause()
 	ScheduleOnce();
 	mPaused=true;
 	return OK;
-}
+}
+
 
 
 status_t AmlogicPlayerRender::onSizeChanged(Rect newR,Rect oldR)
@@ -276,7 +285,8 @@ status_t AmlogicPlayerRender::onSizeChanged(Rect newR,Rect oldR)
 	ScheduleOnce();
 	TRACE();
 	return OK;
-}
+}
+
 
 
 bool AmlogicPlayerRender::threadLoop()

@@ -27,13 +27,13 @@
 #include <sched.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <surfaceflinger/ISurface.h>
+#include <gui/ISurface.h>
 //#include <ui/Overlay.h>
 
-#include <surfaceflinger/Surface.h>
+#include <gui/Surface.h>
 #include <gui/ISurfaceTexture.h>
 #include <gui/SurfaceTextureClient.h>
-#include <surfaceflinger/ISurfaceComposer.h>
+#include <gui/ISurfaceComposer.h>
 
 #include <cutils/properties.h>
 
@@ -63,6 +63,9 @@ namespace android {
 	static status_t STATE_INIT = 0;
 	static status_t STATE_ERROR = 1;
 	static status_t STATE_OPEN = 2;
+	
+	sp<MediaPlayerBase> createAAH_TXPlayer();
+	sp<MediaPlayerBase> createAAH_RXPlayer();
 
 #define  TRACE()	ALOGV("[%s::%d]\n",__FUNCTION__,__LINE__)
 //#define  TRACE()	
@@ -468,7 +471,6 @@ void AmSuperPlayer::setAudioSink(const sp<AudioSink> &audioSink) {
 }
 
 
-
 bool AmSuperPlayer::PropIsEnable(const char* str)
 { 
 	char value[PROPERTY_VALUE_MAX];
@@ -628,6 +630,14 @@ static sp<MediaPlayerBase> createPlayer(player_type playerType, void* cookie,
         case TEST_PLAYER:
             ALOGV("Create Test Player stub");
             p = new TestPlayerStub();
+            break;
+        case AAH_RX_PLAYER:
+            ALOGV(" create A@H RX Player");
+            p = createAAH_RXPlayer();
+            break;
+        case AAH_TX_PLAYER:
+            ALOGV(" create A@H TX Player");
+            p = createAAH_TXPlayer();
             break;
 		case AMSUPER_PLAYER:
 			 ALOGV("Create AmSuperPlayer ");

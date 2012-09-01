@@ -976,7 +976,7 @@ status_t MediaPlayerService::Client::setVolume(float leftVolume, float rightVolu
     ALOGV("[%d] setVolume(%f, %f)", mConnId, leftVolume, rightVolume);
 
     // for hardware output, call player instead
-    sp<MediaPlayerBase> p = getPlayer();
+    /*sp<MediaPlayerBase> p = getPlayer();
     {
       Mutex::Autolock l(mLock);
       if (p != 0 && p->hardwareOutput()) {
@@ -989,6 +989,9 @@ status_t MediaPlayerService::Client::setVolume(float leftVolume, float rightVolu
       }
     }
 
+    return NO_ERROR;*/
+    Mutex::Autolock l(mLock);
+    if (mAudioOutput != 0) mAudioOutput->setVolume(leftVolume, rightVolume);
     return NO_ERROR;
 }
 
