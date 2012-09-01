@@ -72,6 +72,10 @@
 #include "TestPlayerStub.h"
 #include "StagefrightPlayer.h"
 #include "nuplayer/NuPlayerDriver.h"
+#ifdef BUILD_WITH_AMLOGIC_PLAYER
+#include "AmlogicPlayer.h"
+#endif
+#include "AmSuperPlayer.h"
 
 #include <OMX.h>
 
@@ -333,7 +337,7 @@ status_t MediaPlayerService::AudioOutput::dump(int fd, const Vector<String16>& a
             mStreamType, mLeftVolume, mRightVolume);
     result.append(buffer);
     snprintf(buffer, 255, "  msec per frame(%f), latency (%d)\n",
-            mMsecsPerFrame, (mTrack != 0) ? mTrack->latency() : -1);
+            mMsecsPerFrame, mLatency);
     result.append(buffer);
     snprintf(buffer, 255, "  aux effect id(%d), send level (%f)\n",
             mAuxEffectId, mSendLevel);
@@ -578,7 +582,7 @@ sp<MediaPlayerBase> MediaPlayerService::Client::setDataSource_pre(
         return p;
     }
 
-    if (!p->hardwareOutput()) {
+    if (!p->hardwareOutput() || playerType == AMSUPER_PLAYER) {
         mAudioOutput = new AudioOutput(mAudioSessionId);
         static_cast<MediaPlayerInterface*>(p.get())->setAudioSink(mAudioOutput);
     }
@@ -1015,6 +1019,15 @@ status_t MediaPlayerService::Client::getParameter(int key, Parcel *reply) {
     ALOGV("[%d] getParameter(%d)", mConnId, key);
     sp<MediaPlayerBase> p = getPlayer();
     if (p == 0) return UNKNOWN_ERROR;
+	if(key==KEY_PARAMETER_AML_PLAYER_TYPE_STR && p->playerType()!=AMSUPER_PLAYER){
+		/*return player name*/
+		reply->writeString16(String16(AmSuperPlayer::PlayerType2Str(p->playerType())));
+		return 0;
+	}	
+	if(key==KEY_PARAMETER_AML_PLAYER_VIDEO_OUT_TYPE && p->playerType()!=AMSUPER_PLAYER){
+		reply->writeInt32(VIDEO_OUT_SOFT_RENDER);/*other all software*/
+		return 0;
+	}
     return p->getParameter(key, reply);
 }
 
@@ -1293,6 +1306,7 @@ MediaPlayerService::AudioOutput::AudioOutput(int sessionId)
     mRightVolume = 1.0;
     mPlaybackRatePermille = 1000;
     mSampleRateHz = 0;
+    mLatency = 0;
     mMsecsPerFrame = 0;
     mAuxEffectId = 0;
     mSendLevel = 0.0;
@@ -1353,8 +1367,7 @@ ssize_t MediaPlayerService::AudioOutput::frameSize() const
 
 uint32_t MediaPlayerService::AudioOutput::latency () const
 {
-    if (mTrack == 0) return 0;
-    return mTrack->latency();
+    return mLatency;
 }
 
 float MediaPlayerService::AudioOutput::msecsPerFrame() const
@@ -1583,6 +1596,7 @@ status_t MediaPlayerService::AudioOutput::open(
     if (t->getPosition(&pos) == OK) {
         mBytesWritten = uint64_t(pos) * t->frameSize();
     }
+    mLatency = t->latency();
     mTrack = t;
 
     status_t res = t->setSampleRate(mPlaybackRatePermille * mSampleRateHz / 1000);

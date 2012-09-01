@@ -450,6 +450,18 @@ status_t MediaPlayer::seekTo_l(int msec)
             return NO_ERROR;
         }
     }
+    else if (mCurrentState == MEDIA_PLAYER_STATE_ERROR) {
+        // allow seek when player has errors.
+        if ( msec < 0 ) {
+            ALOGW("Attempt to seek to invalid position: %d", msec);
+            msec = 0;
+        } else if ((mDuration > 0) && (msec > mDuration)) {
+            ALOGW("Attempt to seek to past end of file: request = %d, EOF = %d", msec, mDuration);
+            msec = mDuration;
+        }
+        mCurrentPosition = msec;
+        return NO_ERROR;
+    }
     ALOGE("Attempt to perform seekTo in wrong state: mPlayer=%p, mCurrentState=%u", mPlayer.get(), mCurrentState);
     return INVALID_OPERATION;
 }

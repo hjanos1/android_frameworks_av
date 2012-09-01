@@ -323,7 +323,7 @@ status_t AudioSource::dataCallback(const AudioRecord::Buffer& audioBuffer) {
     CHECK_EQ(numLostBytes & 1, 0u);
     CHECK_EQ(audioBuffer.size & 1, 0u);
     if (numLostBytes > 0) {
-        // Loss of audio frames should happen rarely; thus the LOGW should
+        // Loss of audio frames should happen rarely; thus the ALOGW should
         // not cause a logging spam
         ALOGW("Lost audio record data: %d bytes", numLostBytes);
     }

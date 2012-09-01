@@ -155,6 +155,25 @@ enum media_parameter_keys {
     // Playback rate expressed in permille (1000 is normal speed), saved as int32_t, with negative
     // values used for rewinding or reverse playback.
     KEY_PARAMETER_PLAYBACK_RATE_PERMILLE = 1300,                // set only
+
+	//AML Video INFO string,set only
+	KEY_PARAMETER_AML_VIDEO_POSITION_INFO=2000,
+
+	//PLAYER TYPE STRING
+	KEY_PARAMETER_AML_PLAYER_TYPE_STR=2001,
+	//PLAYER VIDEO  OUT/TYPE
+	//public static final int VIDEO_OUT_SOFT_RENDER =	0;
+	//public static final int VIDEO_OUT_HARDWARE	=	1;
+	KEY_PARAMETER_AML_PLAYER_VIDEO_OUT_TYPE=2002,
+	
+	//amlogic private API,set only.
+	//switch sound track
+	KEY_PARAMETER_AML_PLAYER_SWITCH_SOUND_TRACK=2003,//string,refer to lmono,rmono,stereo,set only
+	KEY_PARAMETER_AML_PLAYER_SWITCH_AUDIO_TRACK=2004,//string,refer to audio track index,set only
+	KEY_PARAMETER_AML_PLAYER_TRICKPLAY_FORWARD=2005,//string,refer to forward:speed 
+	KEY_PARAMETER_AML_PLAYER_TRICKPLAY_BACKWARD=2006,//string,refer to  backward:speed
+	KEY_PARAMETER_AML_PLAYER_FORCE_HARD_DECODE=2007,//string,refer to mp3,etc.
+	KEY_PARAMETER_AML_PLAYER_FORCE_SOFT_DECODE=2008,//string,refer to mp3,etc.
 };
 
 // Keep INVOKE_ID_* in sync with MediaPlayer.java.
@@ -173,6 +192,11 @@ enum media_track_type {
     MEDIA_TRACK_TYPE_VIDEO = 1,
     MEDIA_TRACK_TYPE_AUDIO = 2,
     MEDIA_TRACK_TYPE_TIMEDTEXT = 3,
+};
+
+enum video_out_type {
+	VIDEO_OUT_SOFT_RENDER=0,
+	VIDEO_OUT_HARDWARE=1,
 };
 
 // ----------------------------------------------------------------------------

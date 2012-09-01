@@ -63,7 +63,7 @@ CameraSourceTimeLapse::CameraSourceTimeLapse(
         int32_t videoFrameRate,
         const sp<Surface>& surface,
         int64_t timeBetweenFrameCaptureUs)
-    : CameraSource(camera, proxy, cameraId, videoSize, videoFrameRate, surface, true),
+    : CameraSource(camera, proxy, cameraId, videoSize, videoFrameRate, surface, false),
       mTimeBetweenTimeLapseVideoFramesUs(1E6/videoFrameRate),
       mLastTimeLapseFrameRealTimestampUs(0),
       mSkipCurrentFrame(false) {

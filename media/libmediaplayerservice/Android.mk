@@ -20,6 +20,15 @@ LOCAL_SRC_FILES:=               \
     StagefrightPlayer.cpp       \
     StagefrightRecorder.cpp     \
     TestPlayerStub.cpp          \
+    AmlPlayerMetadataRetriever.cpp \
+
+ifeq ($(BUILD_WITH_AMLOGIC_PLAYER),true)
+    LOCAL_SRC_FILES +=AmSuperPlayer.cpp
+    LOCAL_SRC_FILES +=AmlogicPlayer.cpp
+    LOCAL_SRC_FILES +=AmlogicPlayerRender.cpp
+    LOCAL_SRC_FILES +=AmlogicPlayerStreamSource.cpp
+    LOCAL_SRC_FILES +=AmlogicPlayerStreamSourceListener.cpp
+endif
 
 LOCAL_SHARED_LIBRARIES :=       \
     libbinder                   \
@@ -53,6 +62,22 @@ LOCAL_C_INCLUDES :=                                                 \
 ifeq ($(BOARD_USES_QCOM_HARDWARE),true)
 LOCAL_C_INCLUDES += \
     $(TOP)/hardware/qcom/media/mm-core/inc
+endif
+
+ifeq ($(BUILD_WITH_AMLOGIC_PLAYER),true)
+AMPLAYER_APK_DIR=$(TOP)/device/ainol/elf2/packages/LibPlayer/
+LOCAL_C_INCLUDES +=\
+        $(AMPLAYER_APK_DIR)/amplayer/player/include     \
+        $(AMPLAYER_APK_DIR)/amplayer/control/include    \
+        $(AMPLAYER_APK_DIR)/amadec/include      \
+        $(AMPLAYER_APK_DIR)/amcodec/include     \
+        $(AMPLAYER_APK_DIR)/amavutils/include     \
+        $(AMPLAYER_APK_DIR)/amffmpeg/ \
+	$(TOP)/device/ainol/elf2/include
+
+LOCAL_SHARED_LIBRARIES += libui
+LOCAL_SHARED_LIBRARIES +=libamplayer libamavutils
+LOCAL_CFLAGS += -DBUILD_WITH_AMLOGIC_PLAYER=1
 endif
 
 LOCAL_MODULE:= libmediaplayerservice

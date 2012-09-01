@@ -32,6 +32,11 @@
 #include "nuplayer/NuPlayerDriver.h"
 #include <dlfcn.h>
 
+#ifdef BUILD_WITH_AMLOGIC_PLAYER
+#include "AmlogicPlayer.h"
+#endif
+#include "AmSuperPlayer.h"
+
 namespace android {
 
 Mutex MediaPlayerFactory::sLock;
@@ -61,13 +66,27 @@ status_t MediaPlayerFactory::registerFactory_l(IFactory* factory,
     return OK;
 }
 
-player_type MediaPlayerFactory::getDefaultPlayerType() {
-    char value[PROPERTY_VALUE_MAX];
-    if (property_get("media.stagefright.use-nuplayer", value, NULL)
-            && (!strcmp("1", value) || !strcasecmp("true", value))) {
-        return NU_PLAYER;
-    }
+static  bool check_prop_enable(const char* str)
+{
+	char value[PROPERTY_VALUE_MAX];
+	if(property_get(str, value, NULL)>0)
+	{
+		
+		if ((!strcmp(value, "1") || !strcmp(value, "true")))
+		{
+			ALOGV("%s is enabled\n",str);
+			return true;
+		}
+	}
+	ALOGV("%s is disabled\n",str);
+	return false;
+}
 
+player_type MediaPlayerFactory::getDefaultPlayerType() {
+#ifdef BUILD_WITH_AMLOGIC_PLAYER
+	if (check_prop_enable("media.amsuperplayer.enable")) 
+		return AMSUPER_PLAYER;
+#endif		
     return STAGEFRIGHT_PLAYER;
 }
 
@@ -333,7 +352,8 @@ void MediaPlayerFactory::registerBuiltinFactories() {
     registerFactory_l(new StagefrightPlayerFactory(), STAGEFRIGHT_PLAYER);
     registerFactory_l(new NuPlayerFactory(), NU_PLAYER);
     registerFactory_l(new SonivoxPlayerFactory(), SONIVOX_PLAYER);
-    registerFactory_l(new TestPlayerFactory(), TEST_PLAYER);
+    registerFactory_l(new AmlogicPlayer(), AMLOGIC_PLAYER);
+    registerFactory_l(new AmSuperPlayer(), AMSUPER_PLAYER);
 
     const char* FACTORY_LIB           = "libdashplayer.so";
     const char* FACTORY_CREATE_FN     = "CreateDASHFactory";
