@@ -89,7 +89,13 @@ void CameraService::onFirstRef()
         mNumberOfCameras = 0;
     }
     else {
-        mNumberOfCameras = mModule->get_number_of_cameras();
+        //mNumberOfCameras = mModule->get_number_of_cameras();
+	char value[PROPERTY_VALUE_MAX];
+	property_get("hw.cameras", value, "2");
+	if (strcmp(value, "1") == 0)
+	    mNumberOfCameras = 1;
+	else
+	    mNumberOfCameras = 2;
         if (mNumberOfCameras > MAX_CAMERAS) {
             ALOGE("Number of cameras(%d) > MAX_CAMERAS(%d).",
                     mNumberOfCameras, MAX_CAMERAS);
