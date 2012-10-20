@@ -21,6 +21,7 @@
 
 #include <utils/threads.h>
 
+#include <drm/DrmManagerClient.h>
 #include <media/MediaPlayerInterface.h>
 #include <media/AudioTrack.h>
 //#include <ui/Overlay.h>
@@ -31,6 +32,7 @@ extern "C" {
 #include "libavformat/avformat.h"
 }
 #include "AmlogicPlayerStreamSource.h"
+#include "AmlogicPlayerDataSouceProtocol.h"
 #include <player.h>
 #include <player_ctrl.h>
 
@@ -48,7 +50,6 @@ typedef struct AmlogicPlayer_File {
 namespace android {
 
 struct ISurfaceTexture;
-
 
 class AmlogicPlayer : public MediaPlayerInterface {
 	
@@ -112,7 +113,7 @@ private:
 	
 	status_t			updateMediaInfo(void);
 	status_t 			initVideoSurface(void);
-	status_t 			popBuffers(void);
+	status_t 			UpdateBufLevel(hwbufstats_t *pbufinfo);
 
 	
 	//helper functions
@@ -136,8 +137,10 @@ private:
     AmlogicPlayer_File  mAmlogicFile;
     int                 mPlayTime;
     int64_t		    mLastPlayTimeUpdateUS;
+    int64_t		    mLastStreamTimeUpdateUS;
     int 		    LatestPlayerState;		
     int		    mStreamTime;
+    int		    mStreamTimeExtAddS;/**/
     int                 mDuration;
     status_t            mState;
     int                 mStreamType;
@@ -174,12 +177,22 @@ private:
 	char*                    mVideoExtInfo;
 	bool 				mInbuffering;
 	Rect 			curLayout;
+	int 				mDelayUpdateTime;
+	bool 				mEnded;
+	bool                            mHttpWV;
+	bool				isTryDRM;
 	
 	sp<AmlogicPlayerStreamSource> mStreamSource;
+    sp <AmlogicPlayerDataSouceProtocol> mSouceProtocol;
 	sp<IStreamSource> mSource;
 	int fastNotifyMode;// IStreamSource& netflix need it;
 	float mStopFeedingBufLevel;
+	int 	mStopFeedingBuf_ms;
 	bool mLowLevelBufMode;/*save less data on player.*/
+	sp <DecryptHandle> mDecryptHandle;
+	DrmManagerClient *mDrmManagerClient;
+	int mHWaudiobufsize;
+	int mHWvideobufsize;
 };
 
 }; // namespace android

@@ -228,6 +228,8 @@ status_t AmlogicPlayerRender::Update()
 	if(mWindowChanged){
 		mWindowChanged--;
 		updateOSDscaling(1);
+		// set to full stretch mode
+		amvideo_utils_set_screen_mode(1);
 		//VideoPositionUpdate();
 	}
 	return OK;

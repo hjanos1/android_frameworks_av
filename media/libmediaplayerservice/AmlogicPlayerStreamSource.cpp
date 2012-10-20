@@ -26,12 +26,13 @@
 #include <media/stagefright/foundation/AMessage.h>
 #include <media/stagefright/MetaData.h>
 #include "AmlogicPlayerStreamSource.h"
-
+#include <media/stagefright/MediaErrors.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 //#define DUMP_DATA
-#ifdef DUMP_DATA
+#ifdef DUMP_DATA 
+static int dumpindex=0;
 int dumpfd=-1;
 #endif
 namespace android
@@ -87,10 +88,12 @@ int AmlogicPlayerStreamSource::feedMoreData(int datasize)
 {
 	Mutex::Autolock autoLock(mMoreDataLock);
 	int oldneedsize=mNeedMoreDataSize;
-	 ALOGI("AmlogicPlayerStreamSource::feedMoreData new=%d,old=%d\n",datasize,mNeedMoreDataSize);
+	 
 	mNeedMoreDataSize=datasize;
-	if(oldneedsize<0)/*have underflow,may need wake it,*/
-		mWaitCondition.signal();
+	if((datasize>0 && oldneedsize<=0) ||(oldneedsize>0 && datasize<=0)){/*have underflow,may need wake it,*/
+		ALOGI("AmlogicPlayerStreamSource::feedMoreData new=%d,old=%d,pos=%lld\n",datasize,oldneedsize,pos);
+		mWaitCondition.signal(); 
+	}
 	return 0;
 }
 //static
@@ -157,9 +160,12 @@ int AmlogicPlayerStreamSource::Source_open()
     mStreamListener = new AmlogicPlayerStreamSourceListener(mSource, 0);
     mStreamListener->start();
     localdatasize=0;	
-#ifdef DUMP_DATA		
-    dumpfd=open("/tmp/dump.data",O_RDWR|O_CREAT);
+#ifdef DUMP_DATA
+    char filename[256];
+    sprintf(filename,"/tmp/dump.data-%d.ts",dumpindex++);
+    dumpfd=open(filename,O_RDWR|O_CREAT);
 #endif	
+    pos=0;
     return 0;
 }
 int AmlogicPlayerStreamSource::Source_read(unsigned char *buf, int size)
@@ -178,8 +184,9 @@ int AmlogicPlayerStreamSource::Source_read(unsigned char *buf, int size)
 			the netlfix.apk don't like we have buffer on player.
 		*/
 		///usleep(1000*100);/*10ms *100 =1S,same as tcp read*/
+		ALOGI("Read wait::feedMoreData =%d,pos=%lld,waitretry=%d\n",mNeedMoreDataSize,pos,waitretry);
 		mMoreDataLock.lock();
-		mWaitCondition.waitRelative(mMoreDataLock,milliseconds_to_nanoseconds(100));
+		mWaitCondition.waitRelative(mMoreDataLock,milliseconds_to_nanoseconds(10));
 		mMoreDataLock.unlock();
 		if(url_interrupt_cb()){
 			return AVERROR_EXIT;
@@ -228,7 +235,13 @@ int AmlogicPlayerStreamSource::Source_read(unsigned char *buf, int size)
 		if((size-bufelselen)!=0)
 			break;/*have read data before,return first*/
 	}else{
-		if(n==-11 )
+		if(n==INFO_DISCONTINUITY){
+			ALOGI("STREAM INFO DISCONTINUITY message=%d\n", n);
+			continue;/*ignore this INFO,FIXME*/
+		}else if(n==INFO_FORMAT_CHANGED){
+			ALOGI("STREAM INFO INFO_FORMAT_CHANGED message=%d\n", n);
+			continue;/*ignore this INFO,FIXME*/
+		}else if(n==-11 )
 			n= AVERROR(EAGAIN);
 		ALOGV("Source_read error=%d");
 		break;//errors
@@ -245,6 +258,7 @@ int AmlogicPlayerStreamSource::Source_read(unsigned char *buf, int size)
     if(readlen>0){/*readed data,lock and del readed size*/
 		Mutex::Autolock autoLock(mMoreDataLock);
 		mNeedMoreDataSize-=readlen;
+		pos+=readlen;
     }
     return readlen>0?readlen: n;
 }

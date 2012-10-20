@@ -33,10 +33,10 @@
 #include <gui/ISurfaceComposer.h>
 
 #include <android/native_window.h>
-
 #include "AmlogicPlayerRender.h"
 #include <ui/Rect.h>
 
+#include "AmlogicPlayerExtractorDemux.h"
 
 //#include <ui/Overlay.h>
 #define  TRACE()	ALOGV("[%s::%d]\n",__FUNCTION__,__LINE__)
@@ -47,6 +47,8 @@
 extern int android_datasource_init(void);
 
 #include "AmlogicPlayer.h"
+#include "Amvideoutils.h"
+
 #ifndef FBIOPUT_OSD_SRCCOLORKEY
 #define  FBIOPUT_OSD_SRCCOLORKEY    0x46fb
 #endif
@@ -91,20 +93,21 @@ static URLProtocol android_protocol;
 #define MID_800_400_FREESC	(0x10001)
 
 AmlogicPlayer::AmlogicPlayer() :
-    mPlayTime(0), mDuration(0), mState(STATE_ERROR),
+    mPlayTime(0),  mStreamTime(0),mDuration(0),
+	mState(STATE_ERROR),
     mStreamType(-1), mLoop(false), 
     mExit(false), mPaused(false), mRunning(false),
     mPlayer_id(-1),
-    mWidth(0),
-    mHeight(0),
-    mhasVideo(1),
-    mhasAudio(1),
-    mStreamTime(0),
+    mWidth(0), mHeight(0),
+    mhasVideo(1),  mhasAudio(1),   
     mIgnoreMsg(false),
     mTypeReady(false),
-    mAudioTrackNum(0),    
+    mAudioTrackNum(0),       
+    mVideoTrackNum(0),
     mInnerSubNum(0),
-    mVideoTrackNum(0)
+    mHttpWV(false),
+    mDecryptHandle(NULL),
+    mDrmManagerClient(NULL)
 {
 	Mutex::Autolock l(mMutex);
 	streaminfo_valied=false;
@@ -125,12 +128,23 @@ AmlogicPlayer::AmlogicPlayer() :
 	curLayout=Rect(0,0,0,0);
 	video_rotation_degree=0;
 	fastNotifyMode=0;
+	mEnded=false;
 	mLowLevelBufMode=false;
 	LatestPlayerState=PLAYER_INITING;
+	mDelayUpdateTime=0;
+	isTryDRM=false;
+	mStopFeedingBuf_ms=PropGetFloat("media.amplayer.stopbuftime")*1000;
 	mStopFeedingBufLevel=PropGetFloat("media.amplayer.stopbuflevel");
-	if(mStopFeedingBufLevel<=0.000001){
-		mStopFeedingBufLevel=0.05;
-	}
+	if(mStopFeedingBufLevel<0.00001)
+			mStopFeedingBufLevel=0.03;
+
+	mHWaudiobufsize=384*1024;
+	mHWvideobufsize=7*1024*1024;
+	mStreamTimeExtAddS=PropGetFloat("media.amplayer.streamtimeadd");
+	if(mStreamTimeExtAddS<=0)
+		mStreamTimeExtAddS=10000;
+	mLastStreamTimeUpdateUS=ALooper::GetNowUs();
+		
 }
 
 int HistoryMgt(const char * path,int r0w1,int mTime)
@@ -188,6 +202,8 @@ status_t AmlogicPlayer::BasicInit()
                         blocksize=(int)PropGetFloat("media.amplayer.cacheblocksize");
                         player_cache_system_init(1,dir,cachesize,blocksize);
                 }
+		AmlogicPlayerDataSouceProtocol::BasicInit();
+		AmlogicPlayerExtractorDemux::BasicInit();
 	}
 	return 0;
 }
@@ -367,6 +383,21 @@ status_t AmlogicPlayer::setDataSource(
         const char *uri, const KeyedVector<String8, String8> *headers) 
 {
     ALOGV("setDataSource");
+    if(PropIsEnable("media.amplayer.useandroidhttp") &&  !strncmp(uri,"http://",strlen("http://"))){	
+    	mSouceProtocol=AmlogicPlayerDataSouceProtocol::CreateFromUrl(uri,headers);
+		return setdatasource(mSouceProtocol->GetPathString(), -1, 0, 0x7ffffffffffffffLL, NULL);	
+    }else {
+        if(PropIsEnable("media.amplayer.widevineenable") && 
+            !strncmp(uri,"widevine://",strlen("widevine://")))
+         {
+    		mSouceProtocol=AmlogicPlayerDataSouceProtocol::CreateFromUrl(uri,headers);
+            if(mSouceProtocol.get()!=NULL){
+		  mPlay_ctl.auto_buffing_enable=1;
+		  isTryDRM=true;
+                return setdatasource(mSouceProtocol->GetPathString(), -1, 0, 0x7ffffffffffffffLL, NULL);	
+            }
+    	}
+    }
     return setdatasource(uri, -1, 0, 0x7ffffffffffffffLL, headers); // intentionally less than LONG_MAX
 }
 
@@ -492,7 +523,30 @@ int AmlogicPlayer::vp_get_file_handle(URLContext *h)
     return (intptr_t) h->priv_data;
 }
 
-
+status_t AmlogicPlayer::UpdateBufLevel(hwbufstats_t *pbufinfo)
+{
+	if( !pbufinfo || !mLowLevelBufMode || (LatestPlayerState<PLAYER_INITOK) || (LatestPlayerState>PLAYER_ERROR))
+		return 0;
+	mHWaudiobufsize=pbufinfo->abufsize;
+	mHWvideobufsize=pbufinfo->vbufsize;
+	if((!pbufinfo->abufused || pbufinfo->adatasize>mStopFeedingBufLevel*pbufinfo->abufsize) && 
+		(!pbufinfo->vbufused || pbufinfo->vdatasize>mStopFeedingBufLevel*pbufinfo->vbufsize) )
+	{	/*used buf data reached feeding level*/
+		mStreamSource->feedMoreData(0);/*stop feeding*/
+	}else{
+		int needdata=0;
+		if(pbufinfo->vbufused && pbufinfo->vdatasize<mStopFeedingBufLevel*pbufinfo->vbufsize )
+			needdata+=pbufinfo->vbufsize*mStopFeedingBufLevel-pbufinfo->vdatasize;
+		if(pbufinfo->vbufused && pbufinfo->adatasize<mStopFeedingBufLevel*pbufinfo->abufsize)
+			needdata+=pbufinfo->abufsize *mStopFeedingBufLevel-pbufinfo->adatasize;
+		if(needdata<=0)//maybe unkonw reaon,still filled..
+		{/*if one buffer have more data and another no data,keep feeding.*/
+			needdata+=188*10;
+		}
+		mStreamSource->feedMoreData(needdata);/*need more data*/
+	}
+	return 0;
+}
 int AmlogicPlayer::notifyhandle(int pid,int msg,unsigned long ext1,unsigned long ext2)
 {
 	AmlogicPlayer *player =(AmlogicPlayer *)player_get_extern_priv(pid);
@@ -527,8 +581,45 @@ int AmlogicPlayer::NotifyHandle(int pid,int msg,unsigned long ext1,unsigned long
 						mhasVideo=1;
 						mhasAudio=1;
 					}
+					else if ((mDecryptHandle==NULL) && 
+							 (strstr(mTypeStr,"DRMdemux")!=NULL)) {
+						if(mSouceProtocol.get()!=NULL) {
+							mSouceProtocol->getDrmInfo(mDecryptHandle, &mDrmManagerClient);
+
+							if (mDecryptHandle == NULL) {
+								ALOGE("after getDrmInfo, mDecryptHandle = NULL");
+							}
+							if (mDrmManagerClient == NULL) {
+								ALOGE("after getDrmInfo, mDrmManagerClient = NULL");
+							}		
+
+							if (mDecryptHandle != NULL &&mDrmManagerClient !=NULL) {
+								ALOGV("L%d:getmDecryptHandle", __LINE__);
+								if (RightsStatus::RIGHTS_VALID != mDecryptHandle->status) {
+						    		//notifyListener_l(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, ERROR_DRM_NO_LICENSE);
+						    		ALOGE("L%d:getDrmInfo error", __LINE__);
+								}else {
+									mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+										Playback::START, (int64_t)(mPlay_ctl.t_pos * 1000));
+								}
+							}
+						}
+					}
 				break;
 				}
+			case PLAYER_EVENTS_HTTP_WV:
+			{
+				mHttpWV = true;
+				sendEvent(0x12000);
+				ALOGV("Get http wvm, goto WVM Extractor");	
+			}
+				break;
+			case PLAYER_EVENTS_HWBUF_DATA_SIZE_CHANGED:
+				{
+				hwbufstats_t *pbufinfo=(hwbufstats_t *)ext1;
+				UpdateBufLevel(pbufinfo);
+				}
+				break;
 			default:
 				break;
 		}
@@ -549,7 +640,8 @@ int AmlogicPlayer::UpdateProcess(int pid,player_info_t *info)
 			sendEvent(MEDIA_BUFFERING_UPDATE,mPlayTime*100/mDuration);
 		if(!mInbuffering){
 			mInbuffering=true;
-			sendEvent(MEDIA_INFO,MEDIA_INFO_BUFFERING_START);
+			if(!mLowLevelBufMode)
+				sendEvent(MEDIA_INFO,MEDIA_INFO_BUFFERING_START);
 		}
 	}
 	else if(info->status==PLAYER_INITOK)
@@ -569,24 +661,38 @@ int AmlogicPlayer::UpdateProcess(int pid,player_info_t *info)
 	else if(info->status==PLAYER_STOPED || info->status==PLAYER_PLAYEND)
 	{
 		ALOGV("Player status:%s, playback complete",player_status2str(info->status));
+		if(mHttpWV == false) {
+		if(!mEnded)
+			sendEvent(MEDIA_PLAYBACK_COMPLETE);
+		}
+		mEnded=true;
 	}
 	else if(info->status==PLAYER_EXIT )
 	{
 		ALOGV("Player status:%s, playback exit",player_status2str(info->status));
 		mRunning=false;
-		if (!mLoop && mState != STATE_ERROR)//no errors & no loop^M
+		if(mHttpWV == false) {
+		if (!mLoop && (mState != STATE_ERROR) && (!mEnded))//no errors & no loop^M
 			sendEvent(MEDIA_PLAYBACK_COMPLETE);
+		}
+		mEnded=true;
 	}
 	else if(info->status==PLAYER_ERROR)
 	{
+		if(mHttpWV == false) {
 		sendEvent(MEDIA_ERROR,MEDIA_ERROR_UNKNOWN,info->error_no);
 		//sendEvent(MEDIA_ERROR,MEDIA_ERROR_UNKNOWN,info->error_no);
 		ALOGV("Player status:%s, error occur",player_status2str(info->status));
 		//sendEvent(MEDIA_ERROR);
 		sendEvent(MEDIA_ERROR,MEDIA_ERROR_UNKNOWN,-1);
 		mState = STATE_ERROR;
+		}
 	}
-	else
+	else if(info->status == PLAYER_HTTP_WV) {
+		mHttpWV = true;
+		sendEvent(0x12000);
+		ALOGV("Get http wvm, goto WVM Extractor");	
+	}else
 	{
 		if(	info->status==PLAYER_SEARCHING)
 		{
@@ -615,11 +721,12 @@ int AmlogicPlayer::UpdateProcess(int pid,player_info_t *info)
                         mDuration=info->full_time_ms;
 		else if(info->full_time!=-1)
 			mDuration=info->full_time*1000;
-		if(info->current_ms>=100){
+		if(info->current_ms>=100 && mDelayUpdateTime--<=0){
 		 	mPlayTime=info->current_ms;	
 			mLastPlayTimeUpdateUS=ALooper::GetNowUs();
 		}if(info->current_pts!=0 && info->current_pts!=0xffffffff){
 			mStreamTime=info->current_pts/90;/*pts(90000hz)->ms*/
+			mLastStreamTimeUpdateUS=ALooper::GetNowUs();
 		}
 
 		
@@ -632,7 +739,7 @@ int AmlogicPlayer::UpdateProcess(int pid,player_info_t *info)
 		{
 		
 			percent=(info->bufed_pos/(mStreamInfo.stream_info.file_size));
-			ALOGV("Playing percent on percent=%d,bufed pos=%d,Duration=%lld\n",percent,info->bufed_pos,(mStreamInfo.stream_info.file_size));
+			ALOGV("Playing percent on percent=%d,bufed pos=%lld,Duration=%lld\n",percent,info->bufed_pos,(mStreamInfo.stream_info.file_size));
 		}
 		else if(mDuration >0 && streaminfo_valied && mStreamInfo.stream_info.file_size>0)
 		{
@@ -647,24 +754,9 @@ int AmlogicPlayer::UpdateProcess(int pid,player_info_t *info)
 		}
 		if(percent>100) percent=100;
 		else if(percent<0) percent=0;
-		sendEvent(MEDIA_BUFFERING_UPDATE,percent);		
+		if(mDuration>0 && !mLowLevelBufMode)
+			sendEvent(MEDIA_BUFFERING_UPDATE,percent);		
 
-	}
-	if(mLowLevelBufMode && (info->status>PLAYER_INITOK) && (info->status<PLAYER_ERROR))
-		{/*for StreamSource only */
-			if(info->audio_bufferlevel>mStopFeedingBufLevel && info->video_bufferlevel>mStopFeedingBufLevel)
-			{/**/
-				mStreamSource->feedMoreData(0);/*stop feeding*/
-			}else
-			{
-				int needdata=0;
-				if(info->video_bufferlevel<mStopFeedingBufLevel)
-					needdata+=6*1024*1024*(mStopFeedingBufLevel-info->video_bufferlevel);
-				if(info->audio_bufferlevel<mStopFeedingBufLevel)
-					needdata+=500*1024*(mStopFeedingBufLevel-info->audio_bufferlevel);
-				mStreamSource->feedMoreData(needdata);/*need more data*/
-			}
-				
 	}
 	 return 0;
 }
@@ -679,6 +771,20 @@ status_t AmlogicPlayer::GetFileType(char **typestr,int *videos,int *audios)
 	*videos=mhasVideo;
 	
 	*audios=mhasAudio;
+	if(mSouceProtocol.get()!=NULL){
+		mSouceProtocol->getDrmInfo(mDecryptHandle, &mDrmManagerClient);
+	    if (mDecryptHandle != NULL &&mDrmManagerClient !=NULL) {	      
+		    ALOGV("L%d:getmDecryptHandle", __LINE__);
+	        if (RightsStatus::RIGHTS_VALID != mDecryptHandle->status) {
+	            //notifyListener_l(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, ERROR_DRM_NO_LICENSE);
+	            ALOGE("L%d:getDrmInfo error", __LINE__);
+	        }else {
+				mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+             	Playback::START, (int64_t)(mPlay_ctl.t_pos * 1000));
+			}	
+        }		    
+	}
+
 	return NO_ERROR;
 }
 
@@ -757,8 +863,10 @@ status_t AmlogicPlayer::setdatasource(const char *path, int fd, int64_t offset, 
 		    strncmp(path,"https",strlen("https"))==0 || 	
 		    strncmp(path,"rtsp",strlen("rtsp"))==0 || 	
 		    strncmp(path,"mms",strlen("mms"))==0 || 	
-		    strncmp(path,"ftp",strlen("ftp"))==0 )/*if net work mode ,enable buffering*/
+		    strncmp(path,"ftp",strlen("ftp"))==0 ||
+		    strncmp(path,"widevine",strlen("widevine"))==0 )/*if net work mode ,enable buffering*/
 			mPlay_ctl.auto_buffing_enable=1;
+			ALOGV("setDataSource enable buffering\n");
 	}
 	mPlay_ctl.need_start=1;
 	mAmlogicFile.datasource=file;
@@ -807,6 +915,12 @@ status_t AmlogicPlayer::prepareAsync() {
 	mPlay_ctl.buffing_min=(level<0.001 && level >0.0)?level/10:0.001;
 	mPlay_ctl.buffing_middle=level>0?level:0.02;
 	mPlay_ctl.buffing_max=level<0.8?0.8:level;
+	if(mLowLevelBufMode){
+		mPlay_ctl.buffing_min=0.001;
+		mPlay_ctl.buffing_middle=0.01;
+		mPlay_ctl.buffing_max=0.8;
+		mPlay_ctl.callback_fn.update_interval=100;
+	}
 	mPlay_ctl.buffing_starttime_s=buftime;
 	if(mLowLevelBufMode)
 		mPlay_ctl.enable_rw_on_pause=0;/**/
@@ -868,6 +982,10 @@ status_t AmlogicPlayer::start()
 
 	if(mPaused)
 		{
+			if (mDecryptHandle != NULL) {      
+		        mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+		        	Playback::RESUME, 0);
+		    }
 		player_resume(mPlayer_id);
 		}
 	if(mhasVideo && !mRunning){
@@ -880,7 +998,9 @@ status_t AmlogicPlayer::start()
 	}
    	mPaused = false;
     	mRunning = true;
-	
+	mEnded=false;
+	mLastPlayTimeUpdateUS=ALooper::GetNowUs();
+	mDelayUpdateTime=1;
 	//sendEvent(MEDIA_PLAYER_STARTED);
     // wake up render thread
     return NO_ERROR;
@@ -892,6 +1012,11 @@ status_t AmlogicPlayer::stop()
     if (mState != STATE_OPEN) {
         return ERROR_NOT_OPEN;
     }
+	if (mDecryptHandle != NULL) {      
+        	mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+        		Playback::STOP, 0);
+    }
+
     mPaused = true;
     mRunning = false;
 	player_stop(mPlayer_id);
@@ -916,12 +1041,16 @@ status_t AmlogicPlayer::seekTo(int position)
 	player_timesearch(mPlayer_id,time);	
 	if(!mRunning)/*have  not start,we tell it seek end*/
 		sendEvent(MEDIA_SEEK_COMPLETE);
-#else
+#endif
 	ALOGI("seekTo:%d,player_get_state=%x,running=%d,Player time=%dms\n",position,player_get_state(mPlayer_id),mRunning,(int) (ALooper::GetNowUs()-PlayerStartTimeUS)/1000);
-	if (!mRunning || player_get_state(mPlayer_id) == PLAYER_EXIT || player_get_state(mPlayer_id)== PLAYER_NOT_VALID_PID) {
-		if (player_get_state(mPlayer_id) == PLAYER_EXIT || player_get_state(mPlayer_id)== PLAYER_NOT_VALID_PID) {
+	if (!mRunning || player_get_state(mPlayer_id) >= PLAYER_ERROR || player_get_state(mPlayer_id)== PLAYER_NOT_VALID_PID) {
+		if (player_get_state(mPlayer_id) >= PLAYER_ERROR || player_get_state(mPlayer_id)== PLAYER_NOT_VALID_PID) {
 			int watingrunning=10;
 			mIgnoreMsg = true;
+			if (mDecryptHandle != NULL) {
+	            		mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+	                    		Playback::STOP, 0);     
+			}
 			player_exit(mPlayer_id);
 			mPlayer_id = -1;
 			mPlay_ctl.t_pos = (float)position/1000;
@@ -929,25 +1058,40 @@ status_t AmlogicPlayer::seekTo(int position)
 			prepare();
 			mIgnoreMsg = false;
 			LatestPlayerState=PLAYER_INITOK;
+			mEnded=false;	
+			if (mDecryptHandle != NULL) {
+	            		mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+	                    		Playback::START, position);
+			}
 			player_start_play(mPlayer_id);
 			while(LatestPlayerState<=PLAYER_INITOK && watingrunning-->0)
-				usleep(100000);/*wait player running*/		
+				usleep(100000);/*wait player running*/	
+			mDelayUpdateTime=2;
 			LatestPlayerState=PLAYER_RUNNING;/*make sure we are running,*/
 			ALOGI("seek watingrunning:%d,player_get_state=%x,running=%d,Player time=%dms\n",watingrunning,player_get_state(mPlayer_id),mRunning,(int) (ALooper::GetNowUs()-PlayerStartTimeUS)/1000);			
 		} 
-		else 
+		else {
 			player_timesearch(mPlayer_id,(float)position/1000);
+			if (mDecryptHandle != NULL) {
+            mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+                    Playback::PAUSE, 0);
+            mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+                    Playback::START, position);
+			}
+        	mDelayUpdateTime=2;
+		}
 		sendEvent(MEDIA_SEEK_COMPLETE);
 	} else {
-		if (position < (mPlayTime+1000) && position >= (mPlayTime-1000)) {
+		if (position < (mPlayTime+100) && position >= (mPlayTime-100)) {
 			sendEvent(MEDIA_SEEK_COMPLETE);
 		}
 		else{
 			player_timesearch(mPlayer_id,(float)position/1000);
+			mDelayUpdateTime=2;
 			sendEvent(MEDIA_SEEK_COMPLETE);
 		}
 	}
-#endif
+
     mPlayTime=position;
     mLastPlayTimeUpdateUS=ALooper::GetNowUs();
     return NO_ERROR;
@@ -959,13 +1103,22 @@ status_t AmlogicPlayer::pause()
     if (mState != STATE_OPEN) {
         return ERROR_NOT_OPEN;
     }
-	if(mhasVideo)/*video mode,and no video,no audio*/
+
+	if(mhasVideo){/*video mode,and no video,no audio*/		
+		if (mDecryptHandle != NULL) {      
+	        mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+	                Playback::PAUSE, 0);
+	    }	
 		player_pause(mPlayer_id);
+	}
 	else
 	{
 		mIgnoreMsg=true;
 		mPlay_ctl.t_pos=mPlayTime/1000;
-		
+		if (mDecryptHandle != NULL) {      
+	        	mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+	                	Playback::PAUSE, 0);
+	    	}
 		player_stop(mPlayer_id);
 		player_exit(mPlayer_id);
 		mPlayer_id=-1;
@@ -1238,7 +1391,25 @@ status_t AmlogicPlayer::updateMediaInfo(void)
 		}
 		ALOGI("inner subtitle info:%s\n",mSubExtInfo);
 	} 	
-		
+	if(mStreamInfo.stream_info.bitrate>0 && mLowLevelBufMode)
+	{
+		int bitrate=mStreamInfo.stream_info.bitrate;
+		if(mStopFeedingBuf_ms>100){
+			//default the total buf size as 7M;
+			int bufsize=(mHWvideobufsize+mHWaudiobufsize);
+			if(bufsize<0) bufsize=7*1024*1024;
+			if(bitrate<200*1024) bitrate=200*1024;//if bitrate is low ran 200bps,we think maybe have bug on get bitrate.so make sure 200bps.
+			mStopFeedingBufLevel=(float)(mStopFeedingBuf_ms*(bitrate/8)/1000)/(bufsize);
+			ALOGI("recalculate the mStopFeedingBuf_ms=%dms,mStopFeedingBufLevel=%f,bufsize=%d\n",mStopFeedingBuf_ms,mStopFeedingBufLevel,bufsize);
+			if(mStopFeedingBufLevel<=mPlay_ctl.buffing_middle)
+			{
+				mPlay_ctl.buffing_min=mStopFeedingBufLevel/10;
+				mPlay_ctl.buffing_middle=mStopFeedingBufLevel/2;
+				mPlay_ctl.buffing_max=0.8;
+				player_set_autobuffer_level(mPlayer_id,mStopFeedingBufLevel/20,mStopFeedingBufLevel/3,0.8);
+			}
+		}
+	}
 	return OK;
 }
 
@@ -1317,6 +1488,12 @@ status_t AmlogicPlayer::setVideoSurfaceTexture(const sp<ISurfaceTexture>& surfac
 	ALOGV("Set setVideoSurfaceTexture\n");
 	Mutex::Autolock autoLock(mMutex);
 	int oldhavestarted=0;
+	mPlayTime=mPlayTime+(int)(ALooper::GetNowUs()-mLastPlayTimeUpdateUS)/1000;/*save the time before*/
+	if(mDelayUpdateTime>0)
+		mDelayUpdateTime++;/*ignore ++,don't clear the value before*/
+	else
+		mDelayUpdateTime=1;
+	mLastPlayTimeUpdateUS=ALooper::GetNowUs();
 	if(mNativeWindow.get()!=NULL){
 		if(mPlayerRender.get()!=NULL){
 			mPlayerRender->Stop();
@@ -1439,6 +1616,13 @@ status_t    AmlogicPlayer::setParameter(int key, const Parcel &request)
 						
 			}
 			break;			
+		case KEY_PARAMETER_AML_PLAYER_SCREEN_MODE:
+			if(mPlayer_id>=0){
+				int mode = request.readInt32();
+				ALOGI("setParameter screen mode = %d", mode);
+				amvideo_utils_set_screen_mode(mode);
+			}
+			break;
 		default:
 			ALOGI("unsupport setParameter value!=%d\n",key);
 	}
@@ -1461,20 +1645,24 @@ status_t AmlogicPlayer::getCurrentPosition(int* position)
 	//ALOGV("getCurrentPosition\n");
 	ALOGI(" getCurrentPosition Player time=%dms\n",(int) (ALooper::GetNowUs()-PlayerStartTimeUS)/1000);		
 	Mutex::Autolock autoLock(mMutex);
-	if(fastNotifyMode)
-		*position=(int)(mStreamTime);/*jast let uplevel know,we are playing,they don't care it.(netflix's bug/)*/
-	else{
+	if(fastNotifyMode){
+		if(mStreamTime<=0)/*mStreamTime is have not set,just set a big value for netflix may pause bug.*/
+			mStreamTime+=mStreamTimeExtAddS*1000;
+		*position=(int)(mStreamTime+(ALooper::GetNowUs()-mLastStreamTimeUpdateUS)/1000);/*jast let uplevel know,we are playing,they don't care it.(netflix's bug/)*/
+		///*position+=mStreamTimeExtAddS*1000;
+		
+	}else{
 		if(!mPaused && LatestPlayerState==PLAYER_RUNNING){ 
 			int realposition;
 			realposition=mPlayTime+(int)(ALooper::GetNowUs()-mLastPlayTimeUpdateUS)/1000;
 			//ALOGI(" getCurrentPosition mPlayTime=%d,mLastPlayTimeUpdateUS=%lld*1000,GetNowUs()=%lld*1000,realposition=%d\n",
 			//		mPlayTime,mLastPlayTimeUpdateUS/1000,ALooper::GetNowUs()/1000,realposition);
-			*position=((realposition+250)/500)*500;/*del small  changes,<500ms*/
+			*position=((realposition+500)/1000)*1000;/*del small  changes,<500ms*/
 		}else{
-			*position=mPlayTime;
+			*position=((mPlayTime+500)/1000)*1000;
 		}
 	}
-	  ALOGV("CurrentPosition=%dmS\n",*position);
+	  ALOGV("CurrentPosition=%dmS,mStreamTime=%d\n",*position,mStreamTime);
     	return NO_ERROR;
 }
 
@@ -1482,7 +1670,10 @@ status_t AmlogicPlayer::getDuration(int* duration)
 {
 	Mutex::Autolock autoLock(mMutex);
     ALOGV("getDuration\n");
-	*duration=mDuration;
+	if(mDuration<=0)
+		*duration=-1;
+	else
+		*duration=mDuration;
     return NO_ERROR;
 }
 
@@ -1491,7 +1682,13 @@ status_t AmlogicPlayer::release()
 	int exittime;
     ALOGV("release\n");
 	if(mPlayer_id>=0){
-		TRACE();
+		if (mDecryptHandle != NULL) {      
+	        mDrmManagerClient->setPlaybackStatus(mDecryptHandle,
+	        	Playback::STOP, 0);
+		 	mDecryptHandle = NULL;
+         	mDrmManagerClient = NULL;
+	    }	
+
 		player_stop(mPlayer_id);
 		player_exit(mPlayer_id);
 		if(mhasVideo)
@@ -1522,6 +1719,9 @@ status_t AmlogicPlayer::release()
 	}
 	if(mStreamSource.get()!=NULL){
 		mStreamSource.clear();
+	}
+	if(mSouceProtocol.get()!=NULL){
+		mSouceProtocol.clear();
 	}
 	if(mhasAudio && mChangedCpuFreq){
 		SetCpuScalingOnAudio(1);

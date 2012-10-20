@@ -3354,7 +3354,9 @@ bool OMXCodec::drainInputBuffer(BufferInfo *info) {
             memcpy((uint8_t *)info->mData + 4,
                    specific->mData, specific->mSize);
         } else {
-            CHECK(info->mSize >= specific->mSize);
+            //CHECK(info->mSize >= specific->mSize);
+            if(!(info->mSize >= specific->mSize))
+		return false;
             memcpy(info->mData, specific->mData, specific->mSize);
         }
 

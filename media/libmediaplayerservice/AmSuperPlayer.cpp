@@ -63,9 +63,6 @@ namespace android {
 	static status_t STATE_INIT = 0;
 	static status_t STATE_ERROR = 1;
 	static status_t STATE_OPEN = 2;
-	
-	sp<MediaPlayerBase> createAAH_TXPlayer();
-	sp<MediaPlayerBase> createAAH_RXPlayer();
 
 #define  TRACE()	ALOGV("[%s::%d]\n",__FUNCTION__,__LINE__)
 //#define  TRACE()	
@@ -90,6 +87,8 @@ AmSuperPlayer::AmSuperPlayer() :
 	mRenderTid=-1;
 	mSoftPara = NULL;
 	mHardPara = NULL;
+	isRestartCreate = false;
+	isSwitchURL=false;
     ALOGV("AmSuperPlayer init now\n");
 	
 }
@@ -123,7 +122,16 @@ status_t    AmSuperPlayer::setDataSource(const char *uri, const KeyedVector<Stri
 	Mutex::Autolock l(mMutex);
 	TRACE();
 	if(muri!=NULL) free((void*)muri);
-	muri=strdup(uri);
+	if((strncmp(uri,"http://",7)==0 || strncmp(uri,"https://",8)==0) && PropIsEnable("media.amplayer.widevineenable")){
+		char *turi;
+		turi=(char *)malloc(strlen(uri)+16);
+		sprintf(turi,"widevine%s",strchr(uri,':'));///changed the xxxx://..... to widevine:///
+		muri=turi;
+		mOUrl=uri;
+		isSwitchURL=true;
+	}else{
+		muri=strdup(uri);
+	}
 	if (headers) {
         mheaders = *headers;
     }
@@ -221,6 +229,10 @@ status_t    AmSuperPlayer::start()
 		return UNKNOWN_ERROR;
 	}
 	mPlayer->setLooping(mLoop);
+	if(isRestartCreate == true)
+	{	isRestartCreate = false;
+		ALOGV("clear isRestartCreate");
+	}
 	return mPlayer->start();
 }
 status_t    AmSuperPlayer::stop()
@@ -423,8 +435,20 @@ void AmSuperPlayer::Notify(void* cookie, int msg, int ext1, int ext2,const Parce
 				mTypeReady=true;
 				mCondition.signal();
 				break;
-			
-				break;
+			case 0x12000:/*Amlogic Found HTTP_WV*/				
+				if(mRenderTid == -1){
+					isRestartCreate = true;					
+					char *turi = (char *)malloc(strlen(muri) + 8);
+					int length;
+					if(turi) {
+					length = sprintf(turi, "widevine://%s", muri+7);	
+					ALOGV("Drm retry turi=%s\n", turi);
+					}					
+					muri=turi;
+					ALOGV("muri=%s prepare\n", muri);
+    					createThreadEtc(startThread, this, "StartThread", ANDROID_PRIORITY_DEFAULT);
+				}	
+				break;	
 			case MEDIA_BUFFERING_UPDATE:
 				if (mPlayer!=NULL && mNotify!=NULL)
 					mNotify(mCookie,msg, ext1, ext2,obj);
@@ -469,6 +493,7 @@ void AmSuperPlayer::setAudioSink(const sp<AudioSink> &audioSink) {
     MediaPlayerInterface::setAudioSink(audioSink);
 	mAudioSink=audioSink;
 }
+
 
 
 bool AmSuperPlayer::PropIsEnable(const char* str)
@@ -570,7 +595,9 @@ player_type AmSuperPlayer::SuperGetPlayerType(char *type,int videos,int audios)
 			if(match_codecs(type,"mpeg,mpegts,rtsp"))/*some can't parser stream info in header parser*/
 			        return AMLOGIC_PLAYER;
 		}
-
+		if (PropIsEnable("media.amplayer.widevineenable") && match_codecs(type, "drm,DRM,DRMdemux"))
+			return AMLOGIC_PLAYER;	/* 	if DRM allways goto AMLOGIC_PLAYER	*/
+		
 		if (match_codecs(type, "webm,vp8,vp6"))
 			return STAGEFRIGHT_PLAYER;
 
@@ -598,6 +625,11 @@ player_type AmSuperPlayer::SuperGetPlayerType(char *type,int videos,int audios)
 			return AmSuperPlayer::Str2PlayerType(value);
 		}
 	}
+    // if mp2, return AMLogic Player
+    if(match_codecs(type,"mp2")){
+      ALOGI("[%s, %d]:This is MP3 LAYER 2!!!\n", __func__, __LINE__);
+      return AMLOGIC_PLAYER;
+    }
 
     if (PropIsEnable("media.stagefright.enable-player")) {
         return STAGEFRIGHT_PLAYER;
@@ -630,14 +662,6 @@ static sp<MediaPlayerBase> createPlayer(player_type playerType, void* cookie,
         case TEST_PLAYER:
             ALOGV("Create Test Player stub");
             p = new TestPlayerStub();
-            break;
-        case AAH_RX_PLAYER:
-            ALOGV(" create A@H RX Player");
-            p = createAAH_RXPlayer();
-            break;
-        case AAH_TX_PLAYER:
-            ALOGV(" create A@H TX Player");
-            p = createAAH_TXPlayer();
             break;
 		case AMSUPER_PLAYER:
 			 ALOGV("Create AmSuperPlayer ");
@@ -672,11 +696,13 @@ sp<MediaPlayerBase>	AmSuperPlayer::CreatePlayer()
 	sp<MediaPlayerBase> p;
 	char *filetype;
 	int mvideo,maudio;
+	int needretry=0;
 	
 	player_type newtype=AMLOGIC_PLAYER;
-	mTypeReady=false;
 	//p= new AmlogicPlayer();
 Retry:
+	mTypeReady=false;
+	needretry=0;
 	{
 		Mutex::Autolock N(mNotifyMutex);
 		oldmsg_num=0;
@@ -716,8 +742,25 @@ Retry:
 			ALOGV("SuperGetPlayerType:type=%s,videos=%d,audios=%d\n",filetype,mvideo,maudio);
 			newtype=SuperGetPlayerType(filetype,mvideo,maudio);
 			ALOGV("GET New type =%d\n",newtype);
-		}
-		else{
+			if(isSwitchURL)
+			{
+				/*in drm switch mode,and if not drm,we may need to more check,*/
+				if(strstr(filetype,"DRMdemux")==NULL && strcasestr(filetype,"drm")==NULL &&  mOUrl.length()>0)
+				{	/*not drm streaming,goto old url,*/
+					if(muri!=NULL) free((void*)muri);
+					muri=strdup(mOUrl.string());
+					needretry=1;	
+					isSwitchURL=false;
+				}
+			}
+		}else if(isSwitchURL && mOUrl.length()>0){		
+		 	/*is switched url for widevine,switched to orignal url,and try again*/
+			if(muri!=NULL) free((void*)muri);
+			muri=strdup(mOUrl.string());
+			needretry=1;	
+			isSwitchURL=false;
+		}else{
+			
 			newtype=SuperGetPlayerType(NULL,0,0);
 		}
 	}
@@ -727,7 +770,7 @@ Retry:
 		p.clear();
 		p=NULL;
 	}
-	else if(newtype!=p->playerType()){
+	else if(needretry||newtype!=p->playerType()){
 		ALOGV("Need to creat new player=%d\n",newtype);
 		p->stop();
 		p.clear();
@@ -748,7 +791,20 @@ int AmSuperPlayer::startThread(void*arg)
 	return p->initThread();
 }
 int AmSuperPlayer::initThread()
-{	
+{		
+	if (isRestartCreate == true) {
+		stop();
+		if (mPlayer == NULL) return NO_ERROR;
+		mPlayer.clear();
+		if(NULL!=mHardPara){
+			free((void*)mHardPara);
+			mHardPara = NULL;
+		}
+		if(NULL!=mSoftPara){
+			free((void*)mSoftPara);
+			mSoftPara = NULL;
+		}
+	}
 	{
 	  // 	Mutex::Autolock l(mMutex);
 	    mRenderTid = myTid();
@@ -769,7 +825,8 @@ int AmSuperPlayer::initThread()
 	}
 	Mutex::Autolock l(mMutex);
 	mRenderTid = -1;
-	mCondition.signal();
+	if(isRestartCreate == false)
+		mCondition.signal();
 	TRACE();
 
 	return 0;

@@ -174,6 +174,9 @@ enum media_parameter_keys {
 	KEY_PARAMETER_AML_PLAYER_TRICKPLAY_BACKWARD=2006,//string,refer to  backward:speed
 	KEY_PARAMETER_AML_PLAYER_FORCE_HARD_DECODE=2007,//string,refer to mp3,etc.
 	KEY_PARAMETER_AML_PLAYER_FORCE_SOFT_DECODE=2008,//string,refer to mp3,etc.
+
+	// screen_mode, see kernel video drvier screen_mode.
+	KEY_PARAMETER_AML_PLAYER_SCREEN_MODE=2009,
 };
 
 // Keep INVOKE_ID_* in sync with MediaPlayer.java.

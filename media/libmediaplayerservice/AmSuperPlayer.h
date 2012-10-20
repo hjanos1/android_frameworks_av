@@ -98,6 +98,7 @@ private:
 	bool 				mLoop;
 
 	const char 			*muri;
+	String8 				mOUrl; 
 	KeyedVector<String8, String8> mheaders;
 
 	bool 				fd_valid;
@@ -115,7 +116,8 @@ private:
 	pid_t				mRenderTid;
 	const char 			*mSoftPara;
 	const char			*mHardPara;
-	
+	bool				        isRestartCreate;
+	bool					 isSwitchURL;
 
 
 };

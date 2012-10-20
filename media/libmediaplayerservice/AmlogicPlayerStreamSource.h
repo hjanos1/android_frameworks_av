@@ -52,6 +52,7 @@ private:
     int mNeedMoreDataSize;
     char localbuf[188];
     int    localdatasize;
+    int64_t	 pos;
 
 
 };
