@@ -201,8 +201,13 @@ static void InitOMXParams(T *params) {
 }
 
 static bool IsSoftwareCodec(const char *componentName) {
-    if (!strncmp("OMX.google.", componentName, 11)
-        || !strncmp("OMX.PV.", componentName, 7)) {
+    // Set Google's SW 264 decoder as HW type, to work around NetFlix's OMX component checking
+    if (!strncmp("OMX.google.h264.decoder", componentName, 23)) {
+        return false;
+    }
+
+    if (!strncmp("OMX.google.", componentName, 11)) {
+       || !strncmp("OMX.PV.", componentName, 7)) {
         return true;
     }
 
