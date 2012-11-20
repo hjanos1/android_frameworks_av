@@ -68,6 +68,26 @@ static int getCallingUid() {
 
 // ----------------------------------------------------------------------------
 
+#define AML_MIRROR_CAMERA_FILE_PATH "/sys/class/vm/mirror"
+static void amlCameraMirror(int cameraId)
+{
+    char buffer[16];
+    int fd;
+    int mirror;
+
+    if (cameraId == 0) {
+	mirror = 0;
+
+	if (access(AML_MIRROR_CAMERA_FILE_PATH, W_OK) == 0) {
+	    snprintf(buffer, sizeof(buffer), "%d", mirror);
+
+	    fd = open(AML_MIRROR_CAMERA_FILE_PATH, O_WRONLY);
+	    write(fd, buffer, strlen(buffer));
+	    close(fd);
+	}
+    }
+}
+
 // This is ugly and only safe if we never re-create the CameraService, but
 // should be ok for now.
 static CameraService *gCameraService;
@@ -163,6 +183,8 @@ sp<ICamera> CameraService::connect(
         ALOGI("Camera is disabled. connect X (pid %d) rejected", callingPid);
         return NULL;
     }
+
+    amlCameraMirror(cameraId);
 
     Mutex::Autolock lock(mServiceLock);
     if (mClient[cameraId] != 0) {
