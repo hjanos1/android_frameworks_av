@@ -86,7 +86,13 @@ player_type MediaPlayerFactory::getDefaultPlayerType() {
 #ifdef BUILD_WITH_AMLOGIC_PLAYER
 	if (check_prop_enable("media.amsuperplayer.enable")) 
 		return AMSUPER_PLAYER;
-#endif		
+#endif	
+    char value[PROPERTY_VALUE_MAX];
+    if (property_get("media.stagefright.use-nuplayer", value, NULL)
+            && (!strcmp("1", value) || !strcasecmp("true", value))) {
+        return NU_PLAYER;
+    }
+
     return STAGEFRIGHT_PLAYER;
 }
 
@@ -343,6 +349,62 @@ class TestPlayerFactory : public MediaPlayerFactory::IFactory {
     }
 };
 
+class AmlogicPlayerFactory :
+    public MediaPlayerFactory::IFactory {
+  public:
+    virtual float scoreFactory(const sp<IMediaPlayer>& client,
+                               int fd,
+                               int64_t offset,
+                               int64_t length,
+                               float curScore) {
+        char buf[20];
+        lseek(fd, offset, SEEK_SET);
+        read(fd, buf, sizeof(buf));
+        lseek(fd, offset, SEEK_SET);
+
+        long ident = *((long*)buf);
+
+        // Ogg vorbis?
+        if (ident == 0x5367674f) // 'OggS'
+            return 1.0;
+
+        return 0.0;
+    }
+
+    virtual sp<MediaPlayerBase> createPlayer() {
+        ALOGV(" create AmlogicPlayer");
+        return new AmlogicPlayer();
+    }
+};
+
+class AmSuperPlayerFactory :
+    public MediaPlayerFactory::IFactory {
+  public:
+    virtual float scoreFactory(const sp<IMediaPlayer>& client,
+                               int fd,
+                               int64_t offset,
+                               int64_t length,
+                               float curScore) {
+        char buf[20];
+        lseek(fd, offset, SEEK_SET);
+        read(fd, buf, sizeof(buf));
+        lseek(fd, offset, SEEK_SET);
+
+        long ident = *((long*)buf);
+
+        // Ogg vorbis?
+        if (ident == 0x5367674f) // 'OggS'
+            return 1.0;
+
+        return 0.0;
+    }
+
+    virtual sp<MediaPlayerBase> createPlayer() {
+        ALOGV(" create AmSuperPlayer");
+        return new AmSuperPlayer();
+    }
+};
+
 void MediaPlayerFactory::registerBuiltinFactories() {
     Mutex::Autolock lock_(&sLock);
 
@@ -352,8 +414,8 @@ void MediaPlayerFactory::registerBuiltinFactories() {
     registerFactory_l(new StagefrightPlayerFactory(), STAGEFRIGHT_PLAYER);
     registerFactory_l(new NuPlayerFactory(), NU_PLAYER);
     registerFactory_l(new SonivoxPlayerFactory(), SONIVOX_PLAYER);
-    registerFactory_l(new AmlogicPlayer(), AMLOGIC_PLAYER);
-    registerFactory_l(new AmSuperPlayer(), AMSUPER_PLAYER);
+    registerFactory_l(new AmlogicPlayerFactory(), AMLOGIC_PLAYER);
+    registerFactory_l(new AmSuperPlayerFactory(), AMSUPER_PLAYER);
 
     const char* FACTORY_LIB           = "libdashplayer.so";
     const char* FACTORY_CREATE_FN     = "CreateDASHFactory";

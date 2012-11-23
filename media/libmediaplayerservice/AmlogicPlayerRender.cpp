@@ -148,13 +148,13 @@ status_t AmlogicPlayerRender::VideoFrameUpdate()
 		mWindowChanged=3;
 	}	
 	if(1 || rec_changed){ //always in.. ransfer needed
-		err=mNativeWindow->dequeueBuffer(mNativeWindow.get(), &buf);
+		err=mNativeWindow->dequeueBuffer_DEPRECATED(mNativeWindow.get(), &buf);
 		if (err != 0) {
 		    ALOGE("dequeueBuffer failed: %s (%d)", strerror(-err), -err);
 		    return -1;
 		}
 		TRACE();
-		mNativeWindow->lockBuffer(mNativeWindow.get(), buf);
+		mNativeWindow->lockBuffer_DEPRECATED(mNativeWindow.get(), buf);
 		//GraphicBufferMapper &mapper = GraphicBufferMapper::get();
 		TRACE();
 		//Rect bounds(mCropWidth, mCropHeight);
@@ -171,7 +171,7 @@ status_t AmlogicPlayerRender::VideoFrameUpdate()
 		TRACE();
 		graphicBuffer->unlock();
 		///mapper.unlock(buf->handle);
-		mNativeWindow->queueBuffer(mNativeWindow.get(), buf);
+		mNativeWindow->queueBuffer_DEPRECATED(mNativeWindow.get(), buf);
 		graphicBuffer.clear();
 		TRACE();
 	}

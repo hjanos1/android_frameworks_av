@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <pthread.h>
+#include <fcntl.h>
 
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
