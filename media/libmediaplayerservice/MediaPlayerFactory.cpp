@@ -83,6 +83,7 @@ static  bool check_prop_enable(const char* str)
 }
 
 player_type MediaPlayerFactory::getDefaultPlayerType() {
+  ALOGE(">>> getDefaultPlayerType");
 #ifdef BUILD_WITH_AMLOGIC_PLAYER
 	if (check_prop_enable("media.amsuperplayer.enable")) 
 		return AMSUPER_PLAYER;
@@ -110,7 +111,7 @@ void MediaPlayerFactory::unregisterFactory(player_type type) {
 #define GET_PLAYER_TYPE_IMPL(a...)                      \
     Mutex::Autolock lock_(&sLock);                      \
                                                         \
-    player_type ret = STAGEFRIGHT_PLAYER;               \
+    player_type ret = AMSUPER_PLAYER;               \
     float bestScore = 0.0;                              \
                                                         \
     for (size_t i = 0; i < sFactoryMap.size(); ++i) {   \
