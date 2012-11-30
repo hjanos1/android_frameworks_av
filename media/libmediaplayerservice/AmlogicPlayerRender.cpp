@@ -110,7 +110,7 @@ void AmlogicPlayerRender::onFirstRef()
 		int usage=0;
 		int err;
 		 TRACE();
-		native_window_set_usage(mNativeWindow.get(),usage | GRALLOC_USAGE_HW_TEXTURE | GRALLOC_USAGE_EXTERNAL_DISP | GRALLOC_USAGE_AML_VIDEO_OVERLAY);
+		native_window_set_usage(mNativeWindow.get(),usage | GRALLOC_USAGE_HW_TEXTURE | GRALLOC_USAGE_EXTERNAL_DISP | GRALLOC_USAGE_PRIVATE_0);
 		native_window_set_buffer_count(mNativeWindow.get(),3);
 		native_window_set_buffers_format(mNativeWindow.get(),WINDOW_FORMAT_RGBA_8888);
 		native_window_set_scaling_mode(mNativeWindow.get(), NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW);
