@@ -69,7 +69,7 @@ LOCAL_C_INCLUDES += \
 endif
 
 ifeq ($(BUILD_WITH_AMLOGIC_PLAYER),true)
-AMPLAYER_APK_DIR=$(TOP)/device/ainol/elf2/packages/LibPlayer/
+AMPLAYER_APK_DIR=$(TOP)/device/wayteq/w28ref/packages/LibPlayer/
 LOCAL_C_INCLUDES +=\
         $(AMPLAYER_APK_DIR)/amplayer/player/include     \
         $(AMPLAYER_APK_DIR)/amplayer/control/include    \
@@ -77,7 +77,7 @@ LOCAL_C_INCLUDES +=\
         $(AMPLAYER_APK_DIR)/amcodec/include     \
         $(AMPLAYER_APK_DIR)/amavutils/include     \
         $(AMPLAYER_APK_DIR)/amffmpeg/ \
-	$(TOP)/device/ainol/elf2/include
+	$(TOP)/device/wayteq/w28ref/include
 
 LOCAL_SHARED_LIBRARIES += libui
 LOCAL_SHARED_LIBRARIES +=libamplayer libamavutils
