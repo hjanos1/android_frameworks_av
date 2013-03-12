@@ -206,7 +206,7 @@ static bool IsSoftwareCodec(const char *componentName) {
         return false;
     }
 
-    if (!strncmp("OMX.google.", componentName, 11)) {
+    if (!strncmp("OMX.google.", componentName, 11)
        || !strncmp("OMX.PV.", componentName, 7)) {
         return true;
     }
